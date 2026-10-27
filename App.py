@@ -10087,8 +10087,11 @@ def build_tea_battle_report(df_raw, df_rpt, df_mcp, report_date, filter_nv=None)
   out = pd.DataFrame(rows)
   if out.empty:
     return pd.DataFrame(columns=empty_cols)
-  # Chỉ hiển thị CH có RR BEV >= 3 triệu
-  if 'RR BEV [Triệu]' in out.columns:
+  # Chỉ hiển thị CH có MTD TEA [Thùng] >= 3
+  if 'MTD TEA [Thùng]' in out.columns:
+    out = out[pd.to_numeric(out['MTD TEA [Thùng]'], errors='coerce').fillna(0) >= 3.0]
+  elif 'RR BEV [Triệu]' in out.columns:
+    # fallback cũ nếu thiếu cột MTD TEA
     out = out[pd.to_numeric(out['RR BEV [Triệu]'], errors='coerce').fillna(0) >= 3.0]
   if out.empty:
     return pd.DataFrame(columns=empty_cols)
@@ -17307,10 +17310,10 @@ if _nav == '📊 BÁO CÁO KPI':
         f_nv_t = st.multiselect('', nvs, default=[], key='tea_nv', label_visibility='collapsed', placeholder='Tất cả NV')
       with r1c2:
         st.markdown('<p class="filter-label">Mã KH</p>', unsafe_allow_html=True)
-        f_ma_t = st.multiselect('', mas, default=[], key='tea_ma', label_visibility='collapsed', placeholder='Tất cả Mã KH')
+        f_ma_t = st.text_input('', key='tea_ma', label_visibility='collapsed', placeholder='Nhập Mã KH...')
       with r1c3:
         st.markdown('<p class="filter-label">Tên KH</p>', unsafe_allow_html=True)
-        f_ten_t = st.multiselect('', tens, default=[], key='tea_ten', label_visibility='collapsed', placeholder='Tất cả Tên KH')
+        f_ten_t = st.text_input('', key='tea_ten', label_visibility='collapsed', placeholder='Nhập Tên KH...')
       with r1c4:
         st.markdown('<p class="filter-label">L1</p>', unsafe_allow_html=True)
         f_l1_t = st.multiselect('', l1s, default=[], key='tea_l1', label_visibility='collapsed', placeholder='Tất cả L1')
@@ -17330,10 +17333,15 @@ if _nav == '📊 BÁO CÁO KPI':
       if not view.empty:
         if f_nv_t:
           view = view[view['Tên NVBH'].isin(f_nv_t)]
-        if f_ma_t:
-          view = view[view['Mã KH'].astype(str).str.replace(r'\.0$', '', regex=True).isin([str(x) for x in f_ma_t])]
-        if f_ten_t:
-          view = view[view['Tên KH'].astype(str).isin([str(x) for x in f_ten_t])]
+        if f_ma_t and str(f_ma_t).strip():
+          _q = str(f_ma_t).strip()
+          view = view[
+              view['Mã KH'].astype(str).str.replace(r'\.0$', '', regex=True)
+              .str.contains(_q, case=False, na=False)
+          ]
+        if f_ten_t and str(f_ten_t).strip():
+          _q = str(f_ten_t).strip()
+          view = view[view['Tên KH'].astype(str).str.contains(_q, case=False, na=False)]
         if f_l1_t:
           view = view[view['L1'].astype(str).isin([str(x) for x in f_l1_t])]
         if f_thu_t:
@@ -18587,6 +18595,13 @@ if _nav == '🗺️ MCP VISIT':
     col_ds = find_col(
         mcp, ['Doanh Số MTD', 'Doanh số MTD', 'Doanh_so_MTD']
     )
+    col_created = find_col(
+        mcp,
+        [
+            'Created_date', 'Created date', 'Created Date',
+            'created_date', 'Ngày tạo', 'Create Date', 'CREATE_DATE',
+        ],
+    )
 
     saved_mcp_nv = st.query_params.get('mcp_nv', '')
     default_nv_list = (
@@ -18748,6 +18763,54 @@ if _nav == '🗺️ MCP VISIT':
           label_visibility='collapsed',
       )
 
+    # Bộ lọc Created_date: Ngày - Tháng - Năm (áp dụng cả 2 bảng MCP)
+    f_cd_day = f_cd_month = f_cd_year = []
+    if col_created and col_created in mcp.columns:
+      _cd_series = pd.to_datetime(mcp[col_created], errors='coerce')
+      _years = sorted([int(y) for y in _cd_series.dt.year.dropna().unique().tolist()])
+      _months = list(range(1, 13))
+      _days = list(range(1, 32))
+      cd1, cd2, cd3 = st.columns(3)
+      with cd1:
+        st.markdown(
+            '<p class="filter-label">📅 Created_date — Ngày</p>',
+            unsafe_allow_html=True,
+        )
+        f_cd_day = st.multiselect(
+            '',
+            _days,
+            default=[],
+            key='mcp_cd_day',
+            label_visibility='collapsed',
+            placeholder='Tất cả Ngày',
+        )
+      with cd2:
+        st.markdown(
+            '<p class="filter-label">📅 Created_date — Tháng</p>',
+            unsafe_allow_html=True,
+        )
+        f_cd_month = st.multiselect(
+            '',
+            _months,
+            default=[],
+            key='mcp_cd_month',
+            label_visibility='collapsed',
+            placeholder='Tất cả Tháng',
+        )
+      with cd3:
+        st.markdown(
+            '<p class="filter-label">📅 Created_date — Năm</p>',
+            unsafe_allow_html=True,
+        )
+        f_cd_year = st.multiselect(
+            '',
+            _years,
+            default=[],
+            key='mcp_cd_year',
+            label_visibility='collapsed',
+            placeholder='Tất cả Năm',
+        )
+
     st.query_params['mcp_nv'] = (
         ','.join(st.session_state.mcp_nv_input)
         if st.session_state.mcp_nv_input
@@ -18806,6 +18869,17 @@ if _nav == '🗺️ MCP VISIT':
       if f_ds and d_ds and d_ds in dfx.columns:
         formatted_col_ds = pd.to_numeric(dfx[d_ds], errors='coerce').apply(format_number_vn).astype(str)
         dfx = dfx[formatted_col_ds.isin(f_ds)]
+      # Lọc Created_date theo Ngày / Tháng / Năm
+      if col_created and col_created in dfx.columns and (f_cd_day or f_cd_month or f_cd_year):
+        _dt = pd.to_datetime(dfx[col_created], errors='coerce')
+        _mask = pd.Series(True, index=dfx.index)
+        if f_cd_day:
+          _mask &= _dt.dt.day.isin([int(x) for x in f_cd_day])
+        if f_cd_month:
+          _mask &= _dt.dt.month.isin([int(x) for x in f_cd_month])
+        if f_cd_year:
+          _mask &= _dt.dt.year.isin([int(x) for x in f_cd_year])
+        dfx = dfx[_mask.fillna(False)]
       return dfx
 
     try:
@@ -19090,6 +19164,15 @@ if _nav == '🗺️ MCP VISIT':
       df_total_show[d_ds] = pd.to_numeric(
           df_total_show[d_ds], errors='coerce'
       ).apply(format_number_vn)
+    # Format cột 3M sales cùng style với Doanh Số MTD
+    for _c3m in list(df_total_show.columns):
+      _cl = str(_c3m).lower().replace(' ', '').replace('_', '')
+      if _cl in ('3msales', '3msale', 'sales3m') or (
+          '3m' in _cl and 'sale' in _cl
+      ):
+        df_total_show[_c3m] = pd.to_numeric(
+            df_total_show[_c3m], errors='coerce'
+        ).apply(format_number_vn)
 
     total_all_cols = [c for c in list(mcp.columns) if c in df_total_show.columns]
     if d_ds and d_ds in df_total_show.columns and d_ds not in total_all_cols:
@@ -19140,6 +19223,14 @@ if _nav == '🗺️ MCP VISIT':
       df_show['Doanh Số MTD'] = pd.to_numeric(
           df_show['Doanh Số MTD'], errors='coerce'
       ).apply(format_number_vn)
+    for _c3m in list(df_show.columns):
+      _cl = str(_c3m).lower().replace(' ', '').replace('_', '')
+      if _cl in ('3msales', '3msale', 'sales3m') or (
+          '3m' in _cl and 'sale' in _cl
+      ):
+        df_show[_c3m] = pd.to_numeric(
+            df_show[_c3m], errors='coerce'
+        ).apply(format_number_vn)
 
     detail_cols = ['Sub Division', 'Group STD SKU', 'Tên sản phẩm']
     preferred = []
